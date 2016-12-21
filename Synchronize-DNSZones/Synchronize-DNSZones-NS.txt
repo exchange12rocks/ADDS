@@ -1,0 +1,5 @@
+Zone;ExtIP;IntIP
+example.com;192.0.2.2;198.51.100.2
+example.net;192.0.2.3;198.51.100.3
+foo.example.net;192.0.2.4;198.51.100.4
+

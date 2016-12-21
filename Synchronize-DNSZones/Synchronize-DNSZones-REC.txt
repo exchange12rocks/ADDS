@@ -1,0 +1,5 @@
+foo.bar.example.com
+foo.example.com
+foo.example.net
+bar.example.net
+bar.foo.example.net
