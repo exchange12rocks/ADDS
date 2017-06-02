@@ -1,6 +1,6 @@
 ﻿<# MIT License
 
-		Copyright (c) 2016-2017 Kirill Nikolaev
+		Copyright (c) 2016 Kirill Nikolaev
 
 		Permission is hereby granted, free of charge, to any person obtaining a copy
 		of this software and associated documentation files (the "Software"), to deal
@@ -292,9 +292,9 @@ function Update-DnsRecord {
 	)
 
 	if ($RecordName -eq '.') {
-		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} | Where-Object {$_.HostName -eq ''@'' -and $_.RecordType -in (''A'', ''CNAME'')}).RecordType' -f $ZoneName, $RecordName, $NSIP)
+		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} -Node | Where-Object {$_.HostName -eq ''@'' -and $_.RecordType -in (''A'', ''CNAME'')}).RecordType' -f $ZoneName, $RecordName, $NSIP)
 		try {
-			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSIP | Where-Object {$_.HostName -eq '@' -and $_.RecordType -in ('A', 'CNAME')}).RecordType
+			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSIP -Node | Where-Object {$_.HostName -eq '@' -and $_.RecordType -in ('A', 'CNAME')}).RecordType
 		}
 		catch {
 			Invoke-ErrorProcessing -Message ("Get-DnsServerResourceRecord cmdlet for '{0}' record in '{1}' zone  @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 95
@@ -302,9 +302,9 @@ function Update-DnsRecord {
 		}
 	}
 	else {
-		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2}).RecordType' -f $ZoneName, $RecordName, $NSIP)
+		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} -Node).RecordType' -f $ZoneName, $RecordName, $NSIP)
 		try {
-			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSIP).RecordType
+			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSIP -Node).RecordType
 		}
 		catch {
 			if ($Error[0].CategoryInfo.Category -eq 'ObjectNotFound') { # If Resolve-DNSName cmdlet has returned record data, but they are not available via WMI, this means there is a wildcard-record exists.
@@ -421,12 +421,20 @@ function Receive-DnsData {
 	)
 
 	function Invoke-LocalSpecificErrorProcessing {
+        Param (
+            [switch]$EventLog,
+            [string]$FullRecordName,
+            [Microsoft.DnsClient.Commands.RecordType[]]$RecordType,
+            [string]$NSTypeText,
+            [ipaddress]$NSIP
+        )
+
 		$RecordTypeAsAString = ''
 		foreach ($Type in $RecordType) {
 			$RecordTypeAsAString += ('{0},' -f $Type)
 		}
 		$Message = ("DNS name '{0}' of type(s) '{1}' doesn't exist @ {2} NS {3}" -f $FullRecordName, $RecordTypeAsAString, $NSTypeText, $NSIP)
-		if ($External) {
+		if ($EventLog) {
 			Add-ToEventLog -Message $Message -EventId 40 -EntryType Error
 		}
 		Add-ToTextLog -Message $Message
@@ -476,12 +484,12 @@ function Receive-DnsData {
 			}
 		}
 		else {
-			Invoke-LocalSpecificErrorProcessing
+			Invoke-LocalSpecificErrorProcessing -EventLog:$EventLogRequired -FullRecordName $FullRecordName -RecordType $RecordType -NSTypeText $NSTypeText -NSIP $NSIP
 		}
 		return $Answer
 	}
 	else {
-		Invoke-LocalSpecificErrorProcessing
+		Invoke-LocalSpecificErrorProcessing -EventLog:$EventLogRequired -FullRecordName $FullRecordName -RecordType $RecordType -NSTypeText $NSTypeText -NSIP $NSIP
 	}
 }
 
@@ -727,6 +735,7 @@ foreach ($RecordName in $RecordNames){
     }
 }
 
-$Message = "END $(Get-Date)"
+$CurrentMoment = Get-Date
+$Message = ('END {0}' -f $CurrentMoment)
 Add-ToTextLog -Message $Message
 Add-ToEventLog -Message $Message -EventId 105 -EntryType Information
