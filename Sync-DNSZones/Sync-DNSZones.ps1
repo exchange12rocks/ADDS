@@ -37,6 +37,7 @@
 		47 - Resolve-DnsName cmdlet failed to resolve DNS record
 		50 - Could not find suitable set of NS for a record in the input NS file
 		51 - Single-labeled records are not supported yet
+		52 - There is no internal NS for a zone in the input file
 		55 - DNS-zone creation is not yet supported
 		70 - Function Sync-DnsRecord failed
 		72 - Function New-DnsRecord failed
@@ -77,13 +78,13 @@ function Register-EventLog {
 		New-EventLog -LogName $LogName -Source $SourceName
 		}
 	catch {
-		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot create new event log {0}' -f $LogName) -TextLog -Exit
+		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ("Cannot create new '{0}' event log" -f $LogName) -TextLog -Exit
 	}
 	try { #TODO: Limit-EventLog will fail if the event log does not exists even in ShouldProcess mode
 		Limit-EventLog -LogName $LogName -MaximumSize $MaximumSize -OverFlowAction $OverFlowAction
 	}
 	catch {
-		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot set properties for event log {0}' -f $LogName) -TextLog -Exit
+		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ("Cannot set properties for '{0}' event log" -f $LogName) -TextLog -Exit
 	}
 }
 
@@ -108,7 +109,7 @@ function Add-ToEventLog {
 			$LogRegistered = $False
 		}
 		else {
-			Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot determine if {0} is registered' -f $LogName) -TextLog -Exit
+			Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ("Cannot determine if '{0}' event log is registered." -f $LogName) -TextLog -Exit
 		}
 	}
 
@@ -117,14 +118,14 @@ function Add-ToEventLog {
 			Register-EventLog -LogName $LogName -SourceName $SourceName
 		}
 		catch {
-			Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot register event log {0}' -f $LogName) -TextLog -Exit
+			Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ("Cannot register '{0}' event log." -f $LogName) -TextLog -Exit
 		}
 	}
 	try { # TODO: Write-EventLog doesn't support ShouldProcess
 		Write-EventLog -LogName $LogName -Source $SourceName -Message $Message -EventId $EventId -EntryType $EntryType
 	}
 	catch {
-		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot write into event log {0} with source {1}' -f $LogName, $SourceName) -TextLog -Exit
+		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ("Cannot write into '{0}' event log with the source '{1}'." -f $LogName, $SourceName) -TextLog -Exit
 	}
 }
 
@@ -139,7 +140,7 @@ function Add-ToTextLog {
 		Add-Content -Path $LogPath -Value $Message
 	}
 	catch {
-		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot write into text log {0}' -f $LogPath) -EventId 27 -EventLog -Exit
+		Invoke-ErrorProcessing -ErrorRecord $Error[0] -Message ('Cannot write into {0} text log' -f $LogPath) -EventId 27 -EventLog -Exit
 	}
 }
 
@@ -226,8 +227,8 @@ Function Sync-DnsRecord {
 		[string[]]$RecordData,
         
 		[Parameter(Mandatory,
-		HelpMessage='Name Server IP address')]
-		[ipaddress]$NSIP,
+		HelpMessage='Name Server`s DNS name/IP address')]
+		[string]$NSAddress,
 
 		[Parameter(HelpMessage='Action to do: to update the DNS record by default, or to create it, if this parameter is specified')]
 		[switch]$Create
@@ -249,7 +250,7 @@ Function Sync-DnsRecord {
 
 	if ($Create) {
 		try {
-			New-DnsRecord -RecordType $RecordType -RecordName $RecordName -RecordData $RecordData -ZoneName $ZoneName -NSIP $NSIP
+			New-DnsRecord -RecordType $RecordType -RecordName $RecordName -RecordData $RecordData -ZoneName $ZoneName -NSAddress $NSAddress
 		}
 		catch {
 			Invoke-ErrorProcessing -Message ('Function New-DnsRecord failed: RecordName - {0}, ZoneName - {1}, RecordType - {2}, Action - {3}, RecordData - {4}' -f $RecordName, $ZoneName, $RecordType, $Action, $RecordData) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 72
@@ -257,7 +258,7 @@ Function Sync-DnsRecord {
 	}
 	else {
 		try {
-			Update-DnsRecord -RecordType $RecordType -RecordName $RecordName -RecordData $RecordData -ZoneName $ZoneName -NSIP $NSIP
+			Update-DnsRecord -RecordType $RecordType -RecordName $RecordName -RecordData $RecordData -ZoneName $ZoneName -NSAddress $NSAddress
 		}
 		catch {
 			Invoke-ErrorProcessing -Message ('Function Update-DnsRecord failed: RecordName - {0}, ZoneName - {1}, RecordType - {2}, Action - {3}, RecordData - {4}' -f $RecordName, $ZoneName, $RecordType, $Action, $RecordData) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 74
@@ -287,32 +288,32 @@ function Update-DnsRecord {
 		[string[]]$RecordData,
         
 		[Parameter(Mandatory,
-		HelpMessage='Name Server IP address')]
-		[ipaddress]$NSIP
+		HelpMessage='Name Server`s DNS name/IP address')]
+		[string]$NSAddress
 	)
 
 	if ($RecordName -eq '.') {
-		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} -Node | Where-Object {$_.HostName -eq ''@'' -and $_.RecordType -in (''A'', ''CNAME'')}).RecordType' -f $ZoneName, $RecordName, $NSIP)
+		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} -Node | Where-Object {$_.HostName -eq ''@'' -and $_.RecordType -in (''A'', ''CNAME'')}).RecordType' -f $ZoneName, $RecordName, $NSAddress)
 		try {
-			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSIP -Node | Where-Object {$_.HostName -eq '@' -and $_.RecordType -in ('A', 'CNAME')}).RecordType
+			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSAddress -Node | Where-Object {$_.HostName -eq '@' -and $_.RecordType -in ('A', 'CNAME')}).RecordType
 		}
 		catch {
-			Invoke-ErrorProcessing -Message ("Get-DnsServerResourceRecord cmdlet for '{0}' record in '{1}' zone  @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 95
+			Invoke-ErrorProcessing -Message ("Get-DnsServerResourceRecord cmdlet for '{0}' record in '{1}' zone  @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 95
 			return $null
 		}
 	}
 	else {
-		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} -Node).RecordType' -f $ZoneName, $RecordName, $NSIP)
+		Add-ToTextLog -Message ('(Get-DnsServerResourceRecord -ZoneName {0} -Name {1} -ComputerName {2} -Node).RecordType' -f $ZoneName, $RecordName, $NSAddress)
 		try {
-			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSIP -Node).RecordType
+			$RecordTypeInt = (Get-DnsServerResourceRecord -ZoneName $ZoneName -Name $RecordName -ComputerName $NSAddress -Node).RecordType
 		}
 		catch {
 			if ($Error[0].CategoryInfo.Category -eq 'ObjectNotFound') { # If Resolve-DNSName cmdlet has returned record data, but they are not available via WMI, this means there is a wildcard-record exists.
-				New-DnsRecord -RecordType $RecordType -RecordName $RecordName -ZoneName $ZoneName -RecordData $RecordData -NSIP $NSIP # Therefore, we need to switch to create the record rather than updating one.
+				New-DnsRecord -RecordType $RecordType -RecordName $RecordName -ZoneName $ZoneName -RecordData $RecordData -NSAddress $NSAddress # Therefore, we need to switch to create the record rather than updating one.
 				return $null
 			}
 			else {
-				Invoke-ErrorProcessing -Message ("Get-DnsServerResourceRecord cmdlet for '{0}' record in '{1}' zone @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 95
+				Invoke-ErrorProcessing -Message ("Get-DnsServerResourceRecord cmdlet for '{0}' record in '{1}' zone @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 95
 				return $null
 			}
 		}
@@ -321,7 +322,7 @@ function Update-DnsRecord {
 	if ($RecordTypeInt -is 'System.Array') {
 		$RecordTypeInt = $RecordTypeInt | Select-Object -Unique
 		if ($RecordTypeInt -is 'System.Array') {
-			$Message = ("Multiple records with different types returned for the name '{0}' in '{1}' zone at NS {2}" -f $RecordName, $ZoneName, $NSIP)
+			$Message = ("Multiple records with different types returned for the name '{0}' in '{1}' zone at NS {2}." -f $RecordName, $ZoneName, $NSAddress)
 			Add-ToTextLog -Message $Message
 			Add-ToEventLog -Message $Message -EventId 35 -EntryType Error
 			return $null
@@ -329,18 +330,19 @@ function Update-DnsRecord {
 	}
 
 	if ($RecordTypeInt -in ('A','CNAME')) {
-		Add-ToTextLog -Message ('Remove-DnsServerResourceRecord -Name {0} -ZoneName {1} -RRType {2} -ComputerName {3} -Force' -f $RecordName, $ZoneName, $RecordTypeInt, $NSIP)
+		Add-ToTextLog -Message ('Remove-DnsServerResourceRecord -Name {0} -ZoneName {1} -RRType {2} -ComputerName {3} -Force' -f $RecordName, $ZoneName, $RecordTypeInt, $NSAddress)
 		try {
-			Remove-DnsServerResourceRecord -Name $RecordName -ZoneName $ZoneName -RRType $RecordTypeInt -ComputerName $NSIP -Force
+			Remove-DnsServerResourceRecord -Name $RecordName -ZoneName $ZoneName -RRType $RecordTypeInt -ComputerName $NSAddress -Force
 		}
 		catch {
-			Invoke-ErrorProcessing -Message ("Remove-DnsServerResourceRecord cmdlet for '{0}' record of type '{1}' in '{2}' zone @ internal NS {3} failed" -f $RecordName, $RecordTypeInt, $ZoneName, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 90
+			Invoke-ErrorProcessing -Message ("Remove-DnsServerResourceRecord cmdlet for '{0}' record of type '{1}' in '{2}' zone @ internal NS {3} failed" -f $RecordName, $RecordTypeInt, $ZoneName, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 90
+            return $null
 		}
 
-		New-DnsRecord -RecordType $RecordType -RecordName $RecordName -ZoneName $ZoneName -RecordData $RecordData -NSIP $NSIP
+		New-DnsRecord -RecordType $RecordType -RecordName $RecordName -ZoneName $ZoneName -RecordData $RecordData -NSAddress $NSAddress
 	}
 	else {
-		$Message = ('Wrong type of internal record: Name - {0}, Zone - {1}, Type - {2}' -f $RecordName, $ZoneName, $RecordType)
+		$Message = ('Wrong type of the internal record: Name - {0}, Zone - {1}, Type - {2}.' -f $RecordName, $ZoneName, $RecordType)
 		Add-ToTextLog -Message $Message
 		Add-ToEventLog -Message $Message -EventId 30 -EntryType Error
 		return $null
@@ -369,35 +371,35 @@ function New-DnsRecord {
 		[string]$ZoneName,
         
 		[Parameter(Mandatory,
-		HelpMessage='Name Server IP address')]
-		[ipaddress]$NSIP
+		HelpMessage='Name Server`s DNS-name/IP address')]
+		[string]$NSAddress
 	)
 
 	switch ($RecordType) {
 		'CNAME' {
 			foreach ($RecordEntry in $RecordData) {
-				Add-ToTextLog -Message ('Add-DnsServerResourceRecordCName -HostNameAlias {0} -Name {1} -ZoneName {2} -ComputerName {3}' -f $RecordEntry, $RecordName, $ZoneName, $NSIP)
+				Add-ToTextLog -Message ('Add-DnsServerResourceRecordCName -HostNameAlias {0} -Name {1} -ZoneName {2} -ComputerName {3}' -f $RecordEntry, $RecordName, $ZoneName, $NSAddress)
 				try {
-					Add-DnsServerResourceRecordCName -HostNameAlias $RecordEntry -Name $RecordName -ZoneName $ZoneName -ComputerName $NSIP
+					Add-DnsServerResourceRecordCName -HostNameAlias $RecordEntry -Name $RecordName -ZoneName $ZoneName -ComputerName $NSAddress
 				}
 				catch {
-					Invoke-ErrorProcessing -Message ("Add-DnsServerResourceRecordCName cmdlet for '{0}' record of type CNAME in '{1}' zone @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 96
+					Invoke-ErrorProcessing -Message ("Add-DnsServerResourceRecordCName cmdlet for '{0}' record of type CNAME in '{1}' zone @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 96
 				}
 			}
 		Break}
 		'A' {
 			foreach ($RecordEntry in $RecordData) {
-				Add-ToTextLog -Message ('Add-DnsServerResourceRecordA -IPv4Address {0} -Name {1} -ZoneName {2} -ComputerName {3}' -f $RecordEntry, $RecordName, $ZoneName, $NSIP)
+				Add-ToTextLog -Message ('Add-DnsServerResourceRecordA -IPv4Address {0} -Name {1} -ZoneName {2} -ComputerName {3}' -f $RecordEntry, $RecordName, $ZoneName, $NSAddress)
 				try {
-					Add-DnsServerResourceRecordA -IPv4Address $RecordEntry -Name $RecordName -ZoneName $ZoneName -ComputerName $NSIP
+					Add-DnsServerResourceRecordA -IPv4Address $RecordEntry -Name $RecordName -ZoneName $ZoneName -ComputerName $NSAddress
 				}
 				catch {
-					Invoke-ErrorProcessing -Message ("Add-DnsServerResourceRecordA cmdlet for '{0}' record of type 'A' in '{1}' zone @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 97
+					Invoke-ErrorProcessing -Message ("Add-DnsServerResourceRecordA cmdlet for '{0}' record of type 'A' in '{1}' zone @ internal NS {2} failed" -f $RecordName, $ZoneName, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 97
 				}
 			}
 		Break}
 		Default {
-			$Message = ('Wrong type of a record: Name - {0}, Zone - {1}, Type - {2}' -f $RecordName, $ZoneName, $RecordType)
+			$Message = ('Wrong record type: Name - {0}, Zone - {1}, Type - {2}.' -f $RecordName, $ZoneName, $RecordType)
 			Add-ToTextLog -Message $Message
 			Add-ToEventLog -Message $Message -EventId 30 -EntryType Error
 			return $null
@@ -408,14 +410,13 @@ function New-DnsRecord {
 function Receive-DnsData {
 	Param (
 		[Parameter(Mandatory,
-		HelpMessage='Host name for which the function will retrieve data')]
+		HelpMessage='Host name, for which the function will retrieve data')]
 		[string]$RecordName,
 		[Parameter(Mandatory,
-		HelpMessage='Zone name where to look for the host')]
+		HelpMessage='Zone name, where to look for the host')]
 		[string]$ZoneName,
-		[Parameter(Mandatory,
-		HelpMessage='DNS server IP address which use for lookup')]
-		[ipaddress]$NSIP,
+		[Parameter(HelpMessage='DNS server (IP address / name) where to send the request')]
+		[string]$NSAddress,
 		[switch]$External,
 		[Microsoft.DnsClient.Commands.RecordType[]]$RecordType = ('A', 'CNAME')
 	)
@@ -423,32 +424,36 @@ function Receive-DnsData {
 	function Invoke-LocalSpecificErrorProcessing {
         Param (
             [switch]$EventLog,
+			[Parameter(Mandatory)]
             [string]$FullRecordName,
+			[Parameter(Mandatory)]
             [Microsoft.DnsClient.Commands.RecordType[]]$RecordType,
+			[Parameter(Mandatory)]
             [string]$NSTypeText,
-            [ipaddress]$NSIP
+			[Parameter(Mandatory)]
+            [string]$NSAddress,
+			[switch]$Continue
         )
 
 		$RecordTypeAsAString = ''
 		foreach ($Type in $RecordType) {
 			$RecordTypeAsAString += ('{0},' -f $Type)
 		}
-		$Message = ("DNS name '{0}' of type(s) '{1}' doesn't exist @ {2} NS {3}" -f $FullRecordName, $RecordTypeAsAString, $NSTypeText, $NSIP)
+		$Message = ("DNS name '{0}' of type(s) '{1}' doesn't exist @ the {2} NS {3}." -f $FullRecordName, $RecordTypeAsAString, $NSTypeText, $NSAddress)
 		if ($EventLog) {
 			Add-ToEventLog -Message $Message -EventId 40 -EntryType Error
 		}
 		Add-ToTextLog -Message $Message
-		Continue
+		if ($Continue) {
+			Continue
+		}
 	}
 
-	if ($External) {
-		$NSTypeText = 'external'
-		$EventLogRequired = $True
-	}
-	else {
-		$NSTypeText = 'internal'
-		$EventLogRequired = $False
-	}
+    if (!$NSAddress) {
+        $NSAddress = '<System>'
+    }
+
+	$NSTypeText = Get-NSTypeText -External:$External
 
 	if ($RecordName -eq '.') { # The function accepts a dot in $RecordName parameter as an indicator that the record is at the zone level.
 		$FullRecordName = $ZoneName
@@ -457,39 +462,50 @@ function Receive-DnsData {
 		$FullRecordName = ('{0}.{1}' -f $RecordName, $ZoneName)
 	}
 
-	Try {
-		$Answer = Resolve-DnsName -Name $FullRecordName -Server $NSIP -Type ALL | Where-Object {$_.Name -eq $FullRecordName -and $RecordType -contains $_.QueryType}
+	[array]$Answer = $null
+	foreach ($Type in $RecordType) {
+		Try {
+        		if ($NSAddress -eq '<System>') {
+				    $Answer += Resolve-DnsName -Name $FullRecordName -Type $Type
+    	    	}
+        		else {
+            		$Answer += Resolve-DnsName -Name $FullRecordName -Server $NSAddress -Type $Type
+        		}
+		}
+		Catch {
+			if ($Error[0].CategoryInfo.Category -eq 'ResourceUnavailable') {
+			}
+			elseif ($Error[0].CategoryInfo.Category -eq 'OperationTimeout') {
+				Invoke-ErrorProcessing -Message ('The {0} NS {1} is unreachable' -f $NSTypeText, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 43
+				Continue
+			}
+			else {
+				Invoke-ErrorProcessing -Message ("Resolve-DnsName cmdlet failed to resolve '{0}' against the {1} NS {2}" -f $FullRecordName, $NSTypeText, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 47
+				Continue
+			}
+		}
 	}
-	Catch {
-		if ($Error[0].CategoryInfo.Category -eq 'ResourceUnavailable') {
-			Invoke-ErrorProcessing -Message ("DNS record '{0}' doesn't exist @ {1} NS {2}" -f $FullRecordName, $NSTypeText, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog:$EventLogRequired -EventId 40
-			return $null
-		}
-		elseif ($Error[0].CategoryInfo.Category -eq 'OperationTimeout') {
-			Invoke-ErrorProcessing -Message ('{0} NS {1} is unreachable' -f $NSTypeText, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 43
-			Continue
-		}
-		else {
-			Invoke-ErrorProcessing -Message ("Resolve-DnsName cmdlet failed to resolve '{0}' against {1} NS {2}" -f $FullRecordName, $NSTypeText, $NSIP) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 47
-			Continue
-		}
-	}
+
+	$Answer = $Answer | Where-Object {$_.Name -eq $FullRecordName -and $RecordType -contains $_.QueryType}
+
 	if ($Answer) {
 		if ($Answer.Type) {
 			if (($Answer.Type | Select-Object -Unique).GetType().FullName -ne 'Microsoft.DnsClient.Commands.RecordType') { # While multiple records with different types are not the case for 'CNAME' and 'A' types of records, some rogue DNS-server still might allow creation of both of them. Furthermore, you may, try to synchronize records of another types.
-				$Message = ("Multiple records with different types returned for the name '{0}' from {1} NS {2}" -f $FullRecordName, $NSTypeText, $NSIP)
+				$Message = ("Multiple records with different types returned for the name '{0}' from the {1} NS {2}." -f $FullRecordName, $NSTypeText, $NSAddress)
 				Add-ToTextLog -Message $Message
 				Add-ToEventLog -Message $Message -EventId 35 -EntryType Error
 				Continue
 			}
+			else {
+				return $Answer
+			}
 		}
 		else {
-			Invoke-LocalSpecificErrorProcessing -EventLog:$EventLogRequired -FullRecordName $FullRecordName -RecordType $RecordType -NSTypeText $NSTypeText -NSIP $NSIP
+			Invoke-LocalSpecificErrorProcessing -EventLog:$External -FullRecordName $FullRecordName -RecordType $RecordType -NSTypeText $NSTypeText -NSAddress $NSAddress -Continue:$External
 		}
-		return $Answer
 	}
 	else {
-		Invoke-LocalSpecificErrorProcessing -EventLog:$EventLogRequired -FullRecordName $FullRecordName -RecordType $RecordType -NSTypeText $NSTypeText -NSIP $NSIP
+		Invoke-LocalSpecificErrorProcessing -EventLog:$External -FullRecordName $FullRecordName -RecordType $RecordType -NSTypeText $NSTypeText -NSAddress $NSAddress -Continue:$External
 	}
 }
 
@@ -503,12 +519,7 @@ function Optimize-DnsRecord {
         [switch]$External
     )
 
-    if ($External) {
-        $NSTypeText = 'external'
-    }
-    else {
-        $NSTypeText = 'internal'
-    }
+	$NSTypeText = Get-NSTypeText -External:$External
 
     $RecordType = $DnsRecord[0].Type
     switch ($RecordType) {
@@ -620,6 +631,58 @@ function Get-RecordSet {
     }
 }
 
+function Get-AuthoritativeNSAddress {
+    Param (
+        [Parameter(Mandatory)]
+        [string]$ZoneName,
+        [string]$NSAddress
+    )
+
+	try {
+    	if ($NSAddress) {
+        	return (Resolve-DnsName -Name $ZoneName -Type NS -Server $NSAddress).NameHost[0]
+    	}
+    	else {
+			$NSAddress = '<System>'
+        	return (Resolve-DnsName -Name $ZoneName -Type NS).NameHost[0]
+    	}
+	}
+	catch {
+		Invoke-ErrorProcessing -Message ("Resolve-DnsName cmdlet failed to resolve '{0}' against the NS {2}" -f $ZoneName, $NSTypeText, $NSAddress) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 47
+	}
+}
+
+function Get-NSAddressExt {
+    Param (
+        [Parameter(Mandatory)]
+        [string]$ZoneName,
+        [string]$NSAddress,
+        [int]$NSQueryMode
+    )
+
+    switch ($NSQueryMode) {
+        1 { #Use $NSAddressExt to get authoritative servers for the zone.
+            return Get-AuthoritativeNSAddress -ZoneName $ZoneName -NSAddress $NSAddress
+        }
+        Default {
+            return $NSAddress
+        }
+    }
+}
+
+function Get-NSTypeText {
+	Param (
+		[switch]$External
+	)
+
+	if ($External) {
+        return 'external'
+    }
+    else {
+        return 'internal'
+    }
+}
+
 $CurrentMoment = Get-Date
 if ($CurrentMoment.Month -lt 10) {
     $CurrentMonth = ('0{0}' -f $CurrentMoment.Month) # Add leading zero if number of month is single-digit
@@ -668,63 +731,75 @@ $RecordNames = Optimize-Records -FilePath $InRECFilePath
 foreach ($RecordName in $RecordNames){
     if ($RecordName -and $RecordName -notmatch '^\s+$') { # If the line is empty or just spaces, we ignore it.
         [bool]$Action = $false
-        Add-ToTextLog -Message ('RecordName: {0}' -f $RecordName)
+        Add-ToTextLog -Message ('RecordName: {0}.' -f $RecordName)
 
         $RecordSet = Get-RecordSet -RecordName $RecordName
 
         if ($RecordSet) {
-            $NSIPInt = $RecordSet.NSSet.IntIP
-            $NSIPExt = $RecordSet.NSSet.ExtIP
-            $ZoneName = $RecordSet.NSSet.Zone
-            $RecordName = $RecordSet.RecordName
+            $NSAddressInt = $RecordSet.NSSet.IntNS
+			$ZoneName = $RecordSet.NSSet.Zone
 
-            $AnswerExt = Receive-DnsData -RecordName $RecordName -ZoneName $ZoneName -NSIP $NSIPExt -External
-            if ($AnswerExt) {
-                $RecordTypeExt = $AnswerExt.Type | Select-Object -Unique # We assume that Receive-DnsData returns records of the same type only, therefore, we can safely determine their type by picking any one.
-                Add-ToTextLog -Message ('RecordName: {0}, ZoneName: {1}, RecordTypeExt: {2}' -f $RecordName, $ZoneName, $RecordTypeExt)
+			if ($NSAddressInt) {
+            	$NSAddressExt = $RecordSet.NSSet.ExtNS
+            	$NSQueryMode = $RecordSet.NSSet.Mode #1 - Use $NSAddressExt to get authoritative servers for the zone.
+            	$RecordName = $RecordSet.RecordName
 
-                $AnswerInt = Receive-DnsData -RecordName $RecordName -ZoneName $ZoneName -NSIP $NSIPInt
+            	$NSAddressExt = Get-NSAddressExt -ZoneName $ZoneName -NSAddress $NSAddressExt -NSQueryMode $NSQueryMode
 
-                $RecordDataExt = Optimize-DnsRecord -DnsRecord $AnswerExt -External
+            	$AnswerExt = Receive-DnsData -RecordName $RecordName -ZoneName $ZoneName -NSAddress $NSAddressExt -External
+            	if ($AnswerExt) {
+                	$RecordTypeExt = $AnswerExt.Type | Select-Object -Unique # We assume that Receive-DnsData returns records of the same type only, therefore, we can safely determine their type by picking any one.
+                	Add-ToTextLog -Message ('RecordName: {0}, ZoneName: {1}, RecordTypeExt: {2}.' -f $RecordName, $ZoneName, $RecordTypeExt)
 
-                Add-ToTextLog -Message ('RecordName: {0}, ZoneName: {1}, RecordTypeExt: {2}, RecordDataExt: {3}' -f $RecordName, $ZoneName, $RecordTypeExt, $RecordDataExt)
+                	$AnswerInt = Receive-DnsData -RecordName $RecordName -ZoneName $ZoneName -NSAddress $NSAddressInt
 
-                if ($AnswerInt) {
-                    $RecordTypeInt = $AnswerInt.Type | Select-Object -Unique # We assume that Receive-DnsData returns records of the same type only, therefore, we can safely determine their type by picking any one.
-                    $RecordDataInt = Optimize-DnsRecord -DnsRecord $AnswerInt
-                    Add-ToTextLog -Message ('RecordName: {0}, ZoneName: {1}, RecordTypeExt: {2}, RecordDataExt: {3}, RecordTypeInt: {4}, RecordDataInt: {5}' -f $RecordName, $ZoneName, $RecordTypeExt, $RecordDataExt, $RecordTypeInt, $RecordDataInt)
-                }
-                else {
-                    $Action = $true
-                }
-            }
-            else {
-                Continue
-            }
+                	$RecordDataExt = Optimize-DnsRecord -DnsRecord $AnswerExt -External
 
-            if ($Action -and ($RecordName -eq '.')) {
-                $Message = ('DNS-zone creation ({0}) is not yet supported.' -f $ZoneName)
-                Add-ToTextLog -Message $Message
-                Add-ToEventLog -Message $Message -EventId 55 -EntryType Warning
-                Continue
-            }
-            else {
-                if (!$Action) {
-                    $Compared = Compare-Object -ReferenceObject $RecordDataExt -DifferenceObject $RecordDataInt
-                }
-                if ($Action -or $Compared) {
-                    Try {
-                        Sync-DnsRecord -RecordType $RecordTypeExt -RecordName $RecordName -ZoneName $ZoneName -RecordData $RecordDataExt -NSIP $NSIPInt -Create:$Action
-                    }
-                    Catch {
-                        Invoke-ErrorProcessing -Message ('Function Sync-DnsRecord failed: RecordName - {0}, ZoneName - {1}, RecordType - {2},  RecordData - {3}, Action - {4}' -f $RecordName, $ZoneName, $RecordTypeExt, $RecordDataExt, $Action) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 70
-                        Continue
-                    }
-                }
-                else {
-                    Add-ToTextLog -Message ("Internal and external records '{0}' in '{1}' zone are the same" -f $RecordName, $ZoneName)
-                }
-            }
+                	Add-ToTextLog -Message ('RecordName: {0}, ZoneName: {1}, RecordTypeExt: {2}, RecordDataExt: {3}.' -f $RecordName, $ZoneName, $RecordTypeExt, $RecordDataExt)
+
+                	if ($AnswerInt) {
+                    	$RecordTypeInt = $AnswerInt.Type | Select-Object -Unique # We assume that Receive-DnsData returns records of the same type only, therefore, we can safely determine their type by picking any one.
+                    	$RecordDataInt = Optimize-DnsRecord -DnsRecord $AnswerInt
+                    	Add-ToTextLog -Message ('RecordName: {0}, ZoneName: {1}, RecordTypeExt: {2}, RecordDataExt: {3}, RecordTypeInt: {4}, RecordDataInt: {5}.' -f $RecordName, $ZoneName, $RecordTypeExt, $RecordDataExt, $RecordTypeInt, $RecordDataInt)
+                	}
+                	else {
+                    	$Action = $true
+                	}
+            	}
+            	else {
+                	Continue
+            	}
+
+            	if ($Action -and ($RecordName -eq '.')) {
+                	$Message = ('DNS-zone creation ({0}) is not yet supported.' -f $ZoneName)
+                	Add-ToTextLog -Message $Message
+                	Add-ToEventLog -Message $Message -EventId 55 -EntryType Warning
+                	Continue
+            	}
+            	else {
+                	if (!$Action) {
+                    	$Compared = Compare-Object -ReferenceObject $RecordDataExt -DifferenceObject $RecordDataInt
+                	}
+                	if ($Action -or $Compared) {
+                    	Try {
+                        	Sync-DnsRecord -RecordType $RecordTypeExt -RecordName $RecordName -ZoneName $ZoneName -RecordData $RecordDataExt -NSAddress $NSAddressInt -Create:$Action
+                    	}
+                    	Catch {
+                        	Invoke-ErrorProcessing -Message ('Function Sync-DnsRecord failed: RecordName - {0}, ZoneName - {1}, RecordType - {2},  RecordData - {3}, Action - {4}' -f $RecordName, $ZoneName, $RecordTypeExt, $RecordDataExt, $Action) -ErrorRecord $Error[0] -TextLog -EventLog -EventId 70
+                        	Continue
+                    	}
+                	}
+                	else {
+                    	Add-ToTextLog -Message ("Internal and external records '{0}' in '{1}' zone are the same." -f $RecordName, $ZoneName)
+                	}
+            	}
+			}
+			else {
+				$Message = ('Could not find internal NS for {0} zone in the input file {1}.' -f $ZoneName, $InNSFilePath)
+            	Add-ToTextLog -Message $Message
+            	Add-ToEventLog -Message $Message -EventId 52 -EntryType Warning
+            	Continue
+			}
         }
         else {
             $Message = ('Could not find suitable set of NS for {0} record in the input file {1}.' -f $RecordName, $InNSFilePath)

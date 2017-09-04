@@ -1,5 +1,6 @@
-Zone;ExtIP;IntIP
-example.com;192.0.2.2;198.51.100.2
-example.net;192.0.2.3;198.51.100.3
-foo.example.net;192.0.2.4;198.51.100.4
-
+Zone;ExtNS;IntNS;Mode
+example.com;192.0.2.2;198.51.100.2;0
+example.net;;198.51.100.3;1
+foo.example.net;192.0.2.4;198.51.100.4;1
+bar.example.com;ns1.example.com;ns1.example.net;0
+foobar.example.com;ns1.example.com;198.51.100.4;1
